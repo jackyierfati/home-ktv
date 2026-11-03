@@ -1,0 +1,46 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace "com.homektv.player"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.homektv.player"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+        // 点歌服务器的默认地址，编译时可以用 -PktvServer=http://192.168.1.10:8787 写进去；
+        // 不写的话第一次打开会让你输入（长按 OK 也能随时改）
+        buildConfigField "String", "DEFAULT_SERVER", "\"${project.findProperty("ktvServer") ?: ""}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+    implementation "androidx.core:core:1.12.0"
+    implementation "androidx.media3:media3-exoplayer:1.4.1"
+    implementation "androidx.media3:media3-ui:1.4.1"
+    implementation "com.google.zxing:core:3.5.3"
+}

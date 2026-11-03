@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>家庭KTV 管理</title>
+<style>
+:root{--bg:#f6f5fa;--card:#fff;--ink:#1d1b26;--mute:#6f6a80;--line:#e6e3ee;--brand:#6b3fd4;--ok:#1f9d63;--warn:#c9821b;--bad:#cf3f4b}
+@media (prefers-color-scheme:dark){:root{--bg:#141220;--card:#1e1b2c;--ink:#ece9f6;--mute:#9c96b3;--line:#2e2a40;--brand:#9d7bff;--ok:#3cc88a;--warn:#e3a54a;--bad:#ef6b75}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink)}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+h1{font-size:18px;margin:0 12px 0 0}.chip{font-size:13px;color:var(--mute)}.chip b{color:var(--ink)}.spacer{flex:1}
+main{max-width:1080px;margin:0 auto;padding:12px 16px 40px}
+nav{display:flex;gap:6px;margin:4px 0 14px;flex-wrap:wrap}nav button{border-radius:999px}nav button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.primary{background:var(--brand);border-color:var(--brand);color:#fff}button:disabled{opacity:.5;cursor:default}
+input,select{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}.row input{flex:1;min-width:180px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.card h3{margin:0;font-size:16px}.card small{color:var(--mute)}.card .acts{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px}.meter i{display:block;height:100%;background:var(--ok)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:middle}tr:last-child td{border-bottom:0}td.r{text-align:right;white-space:nowrap}
+.tag{font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mute);white-space:nowrap}
+.tag.done{color:var(--ok);border-color:var(--ok)}.tag.queued,.tag.downloading{color:var(--warn);border-color:var(--warn)}.tag.failed{color:var(--bad);border-color:var(--bad)}
+h2{font-size:16px;margin:18px 0 8px}.mute{color:var(--mute)}.hidden{display:none}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0 0 12px}dt{color:var(--mute)}dd{margin:0}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:8px;opacity:0;transition:.2s;pointer-events:none}
+#toast.show{opacity:.92}
+</style>
+</head>
+<body>
+<header><h1>家庭KTV 管理</h1><span class=chip id=qsum>…</span><span class=spacer></span>
+<button id=pause>暂停队列</button><button id=retry>重试失败</button><button id=clear>清空批量排队</button></header>
+<main>
+<nav><button data-tab=singers class=on>歌手</button><button data-tab=songs>歌名</button><button data-tab=lists>歌单 / 榜单</button><button data-tab=queue>下载队列</button><button data-tab=system>曲库与设置</button></nav>
+<section id=singers><div class=row><input id=sq placeholder="歌手名或拼音，留空看热门歌手"><select id=lang><option value="">全部语种</option></select>
+<input id=limit type=number min=0 placeholder="每位最多几首（0=全部）" style="max-width:200px"><button class=primary id=sgo>搜索</button></div>
+<div id=sres class=grid></div><div id=sdetail></div></section>
+<section id=songs class=hidden><div class=row><input id=q placeholder="歌名或拼音"><input id=qs placeholder="歌手（可选）"><button class=primary id=qgo>搜索</button></div><div id=qres></div></section>
+<section id=lists class=hidden><div id=lres class=grid></div><div id=ldetail></div></section>
+<section id=queue class=hidden><h2>正在下载</h2><div id=qdl></div><h2>排队中 <small class=mute>（客人点的歌排在最前面）</small></h2><div id=qq></div><h2>最近完成</h2><div id=qdone></div></section>
+<section id=system class=hidden>
+<h2>曲库</h2><div class=card><dl><dt>本地版本</dt><dd id=cver>…</dd><dt>歌曲数</dt><dd id=csongs>…</dd><dt>i歌霸最新</dt><dd id=cremote>未查询</dd><dt>状态</dt><dd id=cstate>…</dd></dl>
+<div class=acts><button id=ccheck>查询最新版本</button><button class=primary id=cupdate>更新曲库</button></div>
+<p class=mute>更新会从 i歌霸重新拉取整个曲库，大约需要几分钟；完成前旧曲库照常可用。</p></div>
+<h2>名字</h2><div class=card><div class=row><input id=rname maxlength=20 placeholder="电视主页和点歌页上显示的名字，比如 Jack 家庭KTV"><button class=primary id=rsave>保存</button></div></div>
+<h2>电视主页的 WiFi 二维码</h2><div class=card><div class=row><input id=wssid placeholder="WiFi 名称（不填就不显示 WiFi 二维码）"><input id=wpass type=password placeholder="WiFi 密码"><select id=wsec><option value=WPA>WPA/WPA2/WPA3</option><option value=WEP>WEP</option><option value=nopass>不用密码</option></select><button class=primary id=wsave>保存</button></div>
+<p class=mute>朋友用手机相机扫电视上的“连 WiFi”码就能直接连上，不用再问密码。</p></div>
+<h2>电视播放器</h2><div class=card><div class=row><select id=pmode><option value=tv>家庭KTV 播放器（服务端管已点）</option><option value=maidong>麦动（点歌转给麦动）</option></select>
+<input id=player placeholder="麦动地址，如 http://电视的IP:8765"><button class=primary id=psave>保存</button></div>
+<p class=mute>用家庭KTV 播放器时，已点和播放都由 NAS 管，电视上打开「家庭KTV」就行，麦动地址用不到。用麦动时，填它的局域网地址（电视上“扫码点歌”二维码里的地址，不带 /mobile）。</p></div>
+</section>
+</main><div id=toast></div>
+<script src="/static/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#140b2a">
+  <title>家庭KTV 点歌</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-tab="browse">
+  <header class="top">
+    <div class="brand"><span class="logo">♪</span><b id="roomName">家庭KTV</b></div>
+    <div class="top-right"><span id="tv" class="tv">正在连接…</span><button id="me" class="me">设置昵称</button></div>
+  </header>
+
+  <div class="layout">
+    <main id="browse" class="panel browse">
+      <button id="mineBar" class="mine-bar hidden" data-mine-bar="1"></button>
+      <form id="searchForm" class="search">
+        <div class="mode"><button type="button" data-mode="song" class="on">歌名</button><button type="button" data-mode="singer">歌手</button></div>
+        <input id="q" type="search" autocomplete="off" placeholder="歌名或拼音首字母">
+        <button class="primary" type="submit">搜索</button>
+      </form>
+      <nav id="cats" class="cats">
+        <button data-cat="hot" class="on">热门</button>
+        <button data-cat="singers">歌手</button>
+        <button data-cat="charts">排行榜</button>
+        <button data-cat="playlists">歌单</button>
+        <button data-cat="languages">语种</button>
+      </nav>
+      <section id="content"></section>
+    </main>
+
+    <aside class="side">
+      <section id="nowPanel" class="panel now">
+        <small>正在播放</small>
+        <h2 id="nowName">暂无歌曲</h2>
+        <p id="nowSinger">点一首歌开始唱吧</p>
+      </section>
+
+      <section id="remote" class="panel remote">
+        <div class="controls">
+          <button data-action="replay">重唱</button>
+          <button id="play" class="primary" data-action="pause">暂停</button>
+          <button data-action="next">切歌</button>
+        </div>
+        <div class="seg"><button id="accompany" data-vocal="accompany">伴唱</button><button id="original" data-vocal="original">原唱</button></div>
+        <label class="slider"><span>音乐音量 <b id="musicValue">70</b></span><input id="musicVolume" type="range" min="0" max="100" value="70"></label>
+        <label class="slider"><span>麦克风音量 <b id="micValue">70</b></span><input id="micVolume" type="range" min="0" max="100" value="70"></label>
+      </section>
+
+      <section id="room" class="panel room">
+        <div class="room-head">
+          <h3>已点 <span id="queueCount" class="mute"></span></h3>
+          <div id="views" class="seg views hidden"><button data-view="all" class="on">全部</button><button data-view="mine">我点的 <b id="mineCount"></b></button></div>
+        </div>
+        <div id="queue" class="queue"></div>
+      </section>
+    </aside>
+  </div>
+
+  <nav class="tabs">
+    <button data-tab="browse" class="on">点歌</button>
+    <button data-tab="room">已点 <b id="tabCount" class="count hidden">0</b></button>
+    <button data-tab="remote">遥控</button>
+  </nav>
+  <div id="nameDialog" class="dialog hidden">
+    <div class="box">
+      <h2>你叫什么？</h2>
+      <p class="mute">点歌时电视上会显示是谁点的</p>
+      <input id="nameInput" maxlength="16" autocomplete="nickname" placeholder="比如 小王">
+      <div class="dialog-actions"><button id="nameSkip">先不填</button><button id="nameOk" class="primary">好了</button></div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

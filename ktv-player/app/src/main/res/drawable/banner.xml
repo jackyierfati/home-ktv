@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电视桌面横幅 320x180：渐变底色加一个话筒 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="320" android:endY="180"
+                android:startColor="#FFB04DFF" android:endColor="#FFFF4F9A" />
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M160,40a22,22 0,0 1,22 22v28a22,22 0,0 1,-44 0v-28a22,22 0,0 1,22 -22z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="7"
+        android:pathData="M126,88a34,34 0,0 0,68 0M160,122v22M140,146h40" />
+</vector>

@@ -1,0 +1,52 @@
+# 家庭KTV：服务端只用 Python 标准库，一个官方 python 镜像就能跑，不用自己构建镜像。
+#
+#   cp .env.example .env      # 改歌曲目录等
+#   docker compose up -d
+#
+# 在国外、想让下载走中国大陆出口：在 .env 里配好 WireGuard，然后
+#   docker compose --profile vpn up -d
+# 只有下载走 VPN，NAS 和家里其他设备的流量都不经过它。
+services:
+  ktv:
+    image: python:3.12-slim
+    container_name: home-ktv
+    working_dir: /app
+    command: ["python", "-u", "-m", "server.app", "--data", "/data", "--media", "/media", "--port", "8787",
+              "--threads", "${KTV_THREADS:-64}", "--parallel", "${KTV_PARALLEL:-2}"]
+    environment:
+      KTV_NAME: ${KTV_NAME:-家庭KTV}
+      # 下载用的代理；局域网请求（电视、手机）不走它
+      http_proxy: ${KTV_PROXY:-}
+      https_proxy: ${KTV_PROXY:-}
+      no_proxy: localhost,127.0.0.1
+    volumes:
+      - ./ktv-server:/app:ro
+      - ${KTV_DATA:-./data}:/data
+      - ${KTV_MEDIA:-./media}:/media
+    ports:
+      - "${KTV_PORT:-8787}:8787"
+    restart: unless-stopped
+
+  # 可选：gluetun 提供的 HTTP 代理（容器里 http://vpn:8888），只给上面的下载用
+  vpn:
+    profiles: ["vpn"]
+    image: qmcgaw/gluetun:v3
+    container_name: home-ktv-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      VPN_SERVICE_PROVIDER: custom
+      VPN_TYPE: wireguard
+      WIREGUARD_ENDPOINT_IP: ${WIREGUARD_ENDPOINT_IP:-}
+      WIREGUARD_ENDPOINT_PORT: ${WIREGUARD_ENDPOINT_PORT:-51820}
+      WIREGUARD_PUBLIC_KEY: ${WIREGUARD_PUBLIC_KEY:-}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:-}
+      WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL: 25s
+      # 私钥放在文件里，不写进 .env
+      WIREGUARD_PRIVATE_KEY_SECRETFILE: /run/secrets/wireguard_private_key
+      HTTPPROXY: "on"
+    volumes:
+      - ./secrets/wireguard_private_key:/run/secrets/wireguard_private_key:ro
+    restart: unless-stopped

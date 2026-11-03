@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>家庭KTV</title>
+  <link rel="stylesheet" href="/static/tv.css">
+</head>
+<body class="idle">
+  <!-- 没人唱的时候：主页 -->
+  <main id="home">
+    <div class="watermark">KTV</div>
+    <header class="brand">
+      <span class="pill">[J]@cK-Y</span>
+      <h1 id="roomName">家庭KTV</h1>
+      <p class="tagline">歌都在自家 NAS 上 想唱就点</p>
+      <p id="stats" class="stats"></p>
+    </header>
+
+    <section class="queue-col">
+      <h2 id="queueTitle">已点</h2>
+      <div id="homeQueue" class="queue"></div>
+      <p id="hint" class="hint"></p>
+    </section>
+
+    <section class="side-col">
+      <div class="codes">
+        <figure id="wifiCard" class="code hidden"><img id="wifiQr" alt=""><figcaption>连 WiFi<small id="wifiName"></small></figcaption></figure>
+        <figure class="code"><img id="orderQr" alt=""><figcaption>扫码点歌<small id="orderUrl"></small></figcaption></figure>
+      </div>
+      <h3>动态</h3>
+      <ol id="feed" class="feed"></ol>
+    </section>
+
+    <footer id="status" class="status"></footer>
+  </main>
+
+  <!-- 唱歌的时候：叠在视频上面 -->
+  <div id="overlay">
+    <div class="topbar"><span id="nowText"></span><span id="nextText"></span></div>
+    <div id="preparing" class="preparing hidden"></div>
+  </div>
+
+  <!-- 遥控器 ← 键：已点列表和二维码 -->
+  <aside id="panel" class="panel hidden">
+    <h2>已点</h2>
+    <div id="panelQueue" class="queue small"></div>
+    <div class="codes small">
+      <figure id="panelWifiCard" class="code hidden"><img id="panelWifiQr" alt=""><figcaption>连 WiFi</figcaption></figure>
+      <figure class="code"><img id="panelOrderQr" alt=""><figcaption>扫码点歌</figcaption></figure>
+    </div>
+    <p class="keys">OK 暂停/继续 · → 切歌 · ↑↓ 原唱/伴唱 · ← 收起 · 主页键退出</p>
+  </aside>
+
+  <div id="toasts" class="toasts"></div>
+  <div id="offline" class="offline hidden">正在重新连接 NAS…</div>
+  <script src="/static/tv.js"></script>
+</body>
+</html>

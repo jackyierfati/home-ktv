@@ -1,0 +1,30 @@
+# 运行时的数据：歌曲、曲库、设置（里面有 WiFi 密码）、VPN 私钥
+/data/
+/media/
+/secrets/
+.env
+
+# 本机留着参考、不发布的目录
+/maidong-ktv/
+/nas-agent/
+/nas-agent-vpn/
+
+# Python
+__pycache__/
+*.db
+*.part
+*.pyc
+
+# Android
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+*.apk
+*.keystore
+*.jks
+
+.DS_Store
+Thumbs.db
