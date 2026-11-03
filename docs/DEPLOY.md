@@ -1,12 +1,14 @@
 # 部署
 
+中文 | [English](DEPLOY.en.md)
+
 服务端是一个 Docker 容器，用官方的 `python:3.12-slim` 镜像，把 `ktv-server/` 目录只读挂进去运行，不用构建镜像。
 任何能跑 Docker Compose 的机器都可以。
 
 ## 第一次部署
 
 ```bash
-git clone <本仓库地址> home-ktv
+git clone https://github.com/jackyierfati/home-ktv.git
 cd home-ktv
 cp .env.example .env
 docker compose up -d
@@ -95,7 +97,7 @@ docker compose restart ktv
 
 ## 修复旧版下载器下的歌
 
-i歌霸 把 HTTP Range 的右端点当成「不包含」，2026 年 10 月之前的下载器（包括早先给麦动用的网盘代理）每段都少了最后 1 个字节，
+i歌霸 把 HTTP Range 的右端点当成「不包含」，本项目 2026 年 10 月之前的下载器每段都少了最后 1 个字节，
 播放到一半会花屏或报错。现在的下载器已经修好。旧文件可以原地补回：
 
 ```bash

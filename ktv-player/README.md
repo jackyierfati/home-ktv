@@ -1,5 +1,7 @@
 # ktv-player
 
+中文 | [English](README.en.md)
+
 家庭KTV 的 Android TV 播放器（Kotlin + Media3 ExoPlayer）。只负责照着服务端的状态放歌：
 已点、下载、原唱/伴唱都在服务端，电视上不存歌、不管下载。界面是服务端上的 `/tv` 网页，改界面不用重装。
 

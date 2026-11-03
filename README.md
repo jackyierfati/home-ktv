@@ -1,5 +1,7 @@
 # 家庭KTV（Home KTV）
 
+中文 | [English](README.en.md)
+
 在家唱 K：歌存在自己的 NAS 或电脑上，**电视只管放，点歌、遥控、看排到第几都在手机上**。
 
 明明是在家里，电视屏幕不需要花里胡哨的菜单和遥控器点歌。客人连上 WiFi、扫电视上的码，手机上就能搜歌、点歌、切歌、
@@ -64,7 +66,7 @@
 需要：一台局域网里能跑 Docker 的机器，一台 Android TV 设备（在 Chromecast with Google TV 上测试过），手机和电视在同一个 WiFi。
 
 ```bash
-git clone <本仓库地址> home-ktv
+git clone https://github.com/jackyierfati/home-ktv.git
 cd home-ktv
 cp .env.example .env        # 改 KTV_MEDIA：歌曲存哪里，空间要大
 docker compose up -d

@@ -1,5 +1,7 @@
 # ktv-server
 
+中文 | [English](README.en.md)
+
 家庭KTV 的服务端：点歌网页、管理页、电视主页、已点、下载队列、曲库，都在这一个 Python 程序里。
 部署见 [../docs/DEPLOY.md](../docs/DEPLOY.md)，设计见 [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)。
 

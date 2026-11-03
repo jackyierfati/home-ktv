@@ -6,6 +6,12 @@
 # 在国外、想让下载走中国大陆出口：在 .env 里配好 WireGuard，然后
 #   docker compose --profile vpn up -d
 # 只有下载走 VPN，NAS 和家里其他设备的流量都不经过它。
+#
+# Home KTV: the server uses only the Python standard library, so the official python image runs it as is.
+#   cp .env.example .env && docker compose up -d
+# Abroad and want downloads to use a mainland-China exit? Set up WireGuard in .env, then
+#   docker compose --profile vpn up -d
+# Only downloads go through the VPN; nothing else on your network does.
 services:
   ktv:
     image: python:3.12-slim
