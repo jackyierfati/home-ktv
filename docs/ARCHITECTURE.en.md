@@ -73,6 +73,10 @@ and now and then stalls completely. So:
 - Getting an address needs a logged-in i歌霸 account (since 2026-11): `DO_LOGIN` is sent with the official client's
   User-Agent, and address requests carry the returned cookie and UserId. When the session expires the address API
   returns 403; the server logs in again once with the stored password and retries, at most one login per minute.
+- The file server (`g8file.php`) only serves songs while the account is online and only songs on its order list, so
+  `NOTIFY_MYSTATUS` (`IsOnline: 1`, at most once a minute, and again right away after a file 403) and
+  `NOTIFY_MYORDER` are sent before each address request. `NOTIFY_MYORDER`'s `Orders` is the whole order list and replaces the previous one, so it carries the last 50
+  songs (including those still downloading); otherwise those songs would get 403 when they fetch a fresh address.
 - Download routes (set on the admin page, one proxy or `direct` per line) are tried in order: when one can't get an
   address the next is tried, and a failed route is moved to the end for 10 minutes. Whichever route got a song's
   address also downloads its pieces.

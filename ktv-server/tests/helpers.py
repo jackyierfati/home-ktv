@@ -1,4 +1,4 @@
-import json, os, sqlite3, tempfile, threading, urllib.parse
+import json, os, sqlite3, tempfile, threading, urllib.error, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from server.catalog import SCHEMA
@@ -118,11 +118,14 @@ def temp_dirs():
 
 
 class FakeIgeba:
-    """模拟 2026-11 以后的 i歌霸 地址接口：不是官方客户端的 User-Agent、没登录、会话过期都返回 403。
+    """模拟 2026-11 以后的 i歌霸：地址接口不是官方客户端的 User-Agent、没登录、会话过期都返回 403；
+    文件服务器（/g8file.php）只给取地址时账号在线（NOTIFY_MYSTATUS）、而且在已点列表（NOTIFY_MYORDER 的 Orders，
+    整个替换）里的歌。
     账号 u / 密码 p，UserId 42。expire() 让当前会话失效；deny=True 时取地址一直 403。"""
 
     def __init__(self):
         self.logins, self.addresses, self.sid, self.deny = 0, 0, None, False
+        self.orders, self.tokens, self.online, self.heartbeats = [], set(), False, 0
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -136,7 +139,14 @@ class FakeIgeba:
                 self.wfile.write(body)
 
             def do_GET(self):
-                self.reply(200)
+                if not self.path.startswith("/g8file.php"): return self.reply(200)
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if query.get("t", [""])[0] not in fake.tokens: return self.reply(403)
+                body = bytes([0x1a, 0x45, 0xdf, 0xa3]) + b"mkv" * 20          # MKV 文件头
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes 0-{len(body) - 1}/{len(body)}")
+                self.send_header("Content-Length", str(len(body))); self.end_headers()
+                self.wfile.write(body)
 
             def do_POST(self):
                 from server.igeba_source import UA
@@ -151,18 +161,39 @@ class FakeIgeba:
                     return self.reply(200, {"Code": 1, "UserInfo": {"UserId": 42, "NickName": "小王",
                                                                      "Vip": {"VipName": "", "RemainDays": 0}}},
                                       cookie=f"PHPSESSID={fake.sid}; Path=/")
+                cookie = self.headers.get("Cookie") or ""
+                logged_in = fake.sid and f"PHPSESSID={fake.sid}" in cookie and params.get("UserId") == 42
+                if cmd == "NOTIFY_MYSTATUS":
+                    if not logged_in: return self.reply(403)
+                    fake.heartbeats += 1
+                    fake.online = bool(params.get("IsOnline"))
+                    return self.reply(200, {"DisableOnline": {"Value": 0, "Reason": ""}, "RatedCacheSpeed": -2})
+                if cmd == "NOTIFY_MYORDER":
+                    if not logged_in: return self.reply(403)
+                    fake.orders = params["Orders"].split(",")
+                    return self.reply(200, {"Result": 1, "Description": ""})
                 if cmd == "GET_SONGADDR":
                     fake.addresses += 1
-                    cookie = self.headers.get("Cookie") or ""
-                    if fake.deny or not fake.sid or f"PHPSESSID={fake.sid}" not in cookie or params.get("UserId") != 42:
-                        return self.reply(403)
-                    return self.reply(200, {"Result": 0, "Rights": {"Code": 0}, "FileUrl": f"http://cdn/{params['SongNumber']}.mkv"})
+                    if fake.deny or not logged_in: return self.reply(403)
+                    number = params["SongNumber"]
+                    token = f"{number}-{fake.addresses}" if number in fake.orders else "not-ordered"
+                    if number in fake.orders and fake.online: fake.tokens.add(token)
+                    url = f"http://127.0.0.1:{fake.server.server_port}/g8file.php?n={number}&t={token}"
+                    return self.reply(200, {"Result": 0, "Rights": {"Code": 1}, "FileUrl": url})
                 self.reply(404)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.server.daemon_threads = True
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_port}/telnet.php"
+
+    @staticmethod
+    def file_status(url, opener):
+        """用取到地址的那条线路读文件开头，返回 HTTP 状态。"""
+        try:
+            with opener.open(url, timeout=5) as r: return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
 
     def expire(self):
         self.sid = None

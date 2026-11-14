@@ -233,7 +233,7 @@ class TvModeTest(AppBase):
             self.assertEqual("p", settings.get("igeba_password"))                         # 存着，自动重新登录要用
             for path in ("/admin/settings", "/admin/source"):
                 self.assertNotIn('"p"', json.dumps(self.call("GET", path)[1]))           # 但不回给浏览器
-            self.assertEqual("http://cdn/1.mkv", self.ktv.source.song_url("1", stagger=0.2, timeout=3)[0])
+            self.assertEqual(206, FakeIgeba.file_status(*self.ktv.source.song_url("1", stagger=0.2, timeout=3)))
             self.assertEqual(400, self.call("PUT", "/admin/settings", {"download_routes": "igeba-vpn:8888"})[0])
             code, s = self.call("PUT", "/admin/settings", {"download_routes": "http://igeba-vpn:8888/\n直连"})
             self.assertEqual("http://igeba-vpn:8888\ndirect", s["download_routes"])

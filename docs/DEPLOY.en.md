@@ -56,8 +56,12 @@ fails (HTTP 403); songs already downloaded still play.
   password and retries (at most one login per minute).
 - Without a login, the TV home screen's status bar shows 「i歌霸 账号没登录 新歌下载不了」(i歌霸 account not logged in,
   new songs can't download).
-- If the same account is also logged in on Maidong or the official app at the same time, they may log each other out;
-  check this first if 403s keep coming back.
+- The file server only serves songs while the account is "online", and only songs on its order list. So before
+  downloading, the server reports itself online (once a minute) and reports the order list, as the official client
+  does; downloaded songs show up among your account's ordered songs.
+- An account is only active in the place it logged in last. If you log in to the same account in the official client
+  or Maidong, the server can still download, but the admin page shows 「您的账号在另一地点登录」(logged in elsewhere);
+  when the server logs in again by itself, it logs the official client out in turn.
 
 ## Download routes
 

@@ -47,7 +47,7 @@ class FakeSource:
     def __init__(self, url):
         self.url, self.opener = url, urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    def song_url(self, number):
+    def song_url(self, number, **kw):
         return self.url, self.opener
 
 

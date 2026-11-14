@@ -20,7 +20,7 @@ igeba_dl.py — i歌霸 曲库多线程下载器（纯标准库，任何 Python 
 下载要登录 i歌霸 账号：在服务端管理页登录过就行（用 --data 指过去），
 或者设环境变量 KTV_IGEBA_USER / KTV_IGEBA_PASSWORD。
 """
-import argparse, os, sqlite3, threading, time, urllib.request
+import argparse, os, sqlite3, threading, time, urllib.error, urllib.request
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 
 try:
@@ -146,7 +146,12 @@ def download_song(number, name, singer, filename, outdir, threads, on_progress=N
 def _download_locked(number, name, singer, filename, dest, part, lockp, threads, on_progress, should_stop, source):
     try:
         url, opener = source.song_url(number)          # 哪条线路取到的地址，分段也走哪条
-        total = probe(url, opener)
+        try:
+            total = probe(url, opener)
+        except urllib.error.HTTPError as e:
+            if e.code != 403: raise
+            url, opener = source.song_url(number, refresh=True)   # 文件服务器 403：重新报在线和已点再取一次
+            total = probe(url, opener)
     except Exception as e:
         print(f"[失败] {name}/{singer} 取地址: {e}")
         raise
@@ -156,7 +161,7 @@ def _download_locked(number, name, singer, filename, dest, part, lockp, threads,
         with url_lock:
             if url_box[0][0] != bad: return
             try:
-                url_box[0] = source.song_url(number)
+                url_box[0] = source.song_url(number, refresh=True)
                 print(f"  {name}/{singer}: 已重新获取下载地址")
             except Exception as e:
                 print(f"  {name}/{singer}: 重新取地址失败 {e}")

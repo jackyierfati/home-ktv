@@ -4,6 +4,12 @@
 登录协议和麦动 2.1.6 ~ 2.1.12 一样：用官方客户端的 User-Agent POST DO_LOGIN，带着返回的 Cookie 和
 真实的 UserId 去取地址；会话过期时地址接口又会 403，这时用存着的账号密码重新登录一次再取。
 
+地址给的文件服务器（g8file.php）只在账号“在线”时、只给这个账号“已点”的歌，别的一律 403。所以取地址前
+先像官方客户端那样报在线（NOTIFY_MYSTATUS，一分钟最多一次）和已点列表（NOTIFY_MYORDER）。
+Orders 是整个已点列表、会替换掉上一次的，要带上还在下载的歌，不然它们中途重新取地址会 403。
+一个账号同一时间只认最后登录的那个地方；在别处（官方客户端、麦动）登录后，我们的会话还能用，
+但报在线时会收到“您的账号在另一地点登录”，管理页上会提示。
+
 下载线路：一行一个，按顺序试，比如 VPN 的 HTTP 代理、另一个代理、最后 direct（直连）。
 一条线路取地址失败就换下一条；失败过的线路 10 分钟内排到最后。一首歌用哪条线路取到地址，
 分段下载也走同一条线路。
@@ -15,6 +21,8 @@ UA = "Mozilla/3.0 (compatible; Indy Library)"     # i歌霸 官方客户端的 U
 DIRECT = "direct"
 SKIP_FAILED = 600                                   # 失败过的线路这么多秒内先排到最后
 RELOGIN_GAP = 60                                    # 两次自动重新登录至少隔这么久
+ORDERS_KEEP = 50                                    # 报给 i歌霸 的已点列表最多带这么多首（最近下的）
+ONLINE_EVERY = 60                                   # 报在线的间隔（秒）
 
 
 class SourceError(RuntimeError):
@@ -101,6 +109,7 @@ class Account:
         self.cookies = http.cookiejar.LWPCookieJar(os.path.join(data_dir, "igeba_cookies.txt"))
         self.lock = threading.Lock()
         self.info, self.error, self.login_at = {}, None, 0
+        self.elsewhere = None                          # 报在线时 i歌霸 说这个账号在别处登录着
         try:
             with open(self.info_path, encoding="utf-8") as f: self.info = json.load(f)
             self.cookies.load(ignore_discard=True)
@@ -139,7 +148,7 @@ class Account:
                          "user": user.strip(), "vip": vip.get("VipName") or "", "vip_days": vip.get("RemainDays") or 0}
             self.cookies.clear()
             for cookie in fresh: self.cookies.set_cookie(cookie)
-            self.error, self.login_at = None, time.time()
+            self.error, self.login_at, self.elsewhere = None, time.time(), None
             self._save()
             return self.info["nickname"]
 
@@ -168,7 +177,8 @@ class Account:
     def status(self):
         return {"logged_in": bool(self.user_id), "user": self.info.get("user") or self.credentials()[0] or "",
                 "nickname": self.info.get("nickname") or "", "vip": self.info.get("vip") or "",
-                "vip_days": self.info.get("vip_days") or 0, "auto_relogin": self.has_credentials(), "error": self.error}
+                "vip_days": self.info.get("vip_days") or 0, "auto_relogin": self.has_credentials(), "error": self.error,
+                "elsewhere": self.elsewhere}
 
 
 class Routes:
@@ -229,6 +239,40 @@ class Source:
         self.address_url = address_url
         self.account = Account(data_dir, credentials, address_url)
         self.routes = Routes(get_routes, self.account.cookies)
+        self.orders, self.orders_lock = [], threading.Lock()
+        self.online_at, self.online_since, self.online_lock = 0, 0, threading.Lock()
+
+    def keep_online(self, opener, timeout=20, force=False):
+        """像官方客户端那样报“在线”，文件服务器只在账号在线时给文件。一分钟最多报一次，force 时马上报。"""
+        with self.online_lock:
+            now = time.time()
+            if not force and now - self.online_at < ONLINE_EVERY: return
+            self.online_since = self.online_since or now
+            params = {"UserId": self.account.user_id, "IsOnline": 1, "OnlSecond": int(now - self.online_since),
+                      "VipSecond": 0, "IdleSecond": 0, "PlaySecond": 0, "CacheTraffic": 0, "DownTraffic": 0, "Request": 1}
+            try:
+                j = post(opener, self.address_url, "NOTIFY_MYSTATUS", params, timeout)
+            except urllib.error.HTTPError as e:
+                if e.code == 403: raise Forbidden() from e
+                raise
+            self.online_at = time.time()
+            disabled = j.get("DisableOnline") or {}
+            self.account.elsewhere = (disabled.get("Reason") or "这个账号在别处登录着") if disabled.get("Value") else None
+
+    def notify_order(self, opener, number, timeout=20):
+        """把这首歌加进报给 i歌霸 的已点列表，文件服务器才肯给文件。"""
+        with self.orders_lock:
+            if number in self.orders: self.orders.remove(number)
+            self.orders.append(number)
+            del self.orders[:-ORDERS_KEEP]
+            orders = ",".join(self.orders)
+        try:
+            j = post(opener, self.address_url, "NOTIFY_MYORDER",
+                     {"UserId": self.account.user_id, "Action": 1, "SongNumbers": number, "Orders": orders}, timeout)
+        except urllib.error.HTTPError as e:
+            if e.code == 403: raise Forbidden() from e
+            raise
+        if isinstance(j.get("Result"), int) and j["Result"] < 0: raise SourceError(j.get("Description") or "报已点失败")
 
     def address_once(self, opener, number, timeout=20):
         j = post(opener, self.address_url, "GET_SONGADDR", {"UserId": self.account.user_id, "SongNumber": number}, timeout)
@@ -239,21 +283,25 @@ class Source:
         if not url.startswith("http"): raise SourceError("未返回播放地址")
         return url
 
-    def song_url(self, number, attempts=4, stagger=5, timeout=20):
+    def song_url(self, number, attempts=4, stagger=5, timeout=20, refresh=False):
+        """refresh：文件服务器刚回过 403（比如在线状态过期了），这次马上重新报在线。"""
         if not self.account.user_id and not self.account.has_credentials():
             raise LoginError("还没登录 i歌霸 账号：请在管理页「曲库与设置」里登录")
         errors = []
         for route in self.routes.ordered():
             opener, began = self.routes.opener(route), time.time()
             build = lambda jar, route=route: self.routes.build(route, jar)
-            ask = lambda: race(lambda: self.address_once(opener, number, timeout), attempts, stagger, timeout)
+            def ask(force):
+                self.keep_online(opener, timeout, force)         # 先报在线和已点，文件服务器才肯给这首
+                self.notify_order(opener, number, timeout)
+                return race(lambda: self.address_once(opener, number, timeout), attempts, stagger, timeout)
             try:
                 if not self.account.user_id: self.account.login(build)
                 try:
-                    url = ask()
+                    url = ask(refresh)
                 except Forbidden:
                     if not self.account.relogin(build): raise
-                    url = ask()
+                    url = ask(True)
                 self.routes.ok(route, time.time() - began)
                 return url, opener
             except LoginError:
@@ -275,7 +323,8 @@ class Source:
         raise last or SourceError("没有可用的下载线路")
 
     def test_routes(self, sample="10005213"):
-        """管理页「测试线路」：每条线路能不能连上 i歌霸、从哪个国家出去、登录了的话能不能取到地址。"""
+        """管理页「测试线路」：每条线路能不能连上 i歌霸、从哪个国家出去；登录了的话再取一次地址、
+        读一小段歌曲文件（文件服务器 403 也能在这里看出来）。"""
         out = []
         for route in self.routes.get_list():
             opener, item = self.routes.opener(route), {"route": route}
@@ -294,9 +343,16 @@ class Source:
             if self.account.user_id:
                 began = time.time()
                 try:
-                    self.address_once(opener, sample, 20)
+                    self.keep_online(opener, 20)
+                    self.notify_order(opener, sample, 20)
+                    url = self.address_once(opener, sample, 20)
                     item["address"] = round(time.time() - began, 1)
+                    began = time.time()
+                    req = urllib.request.Request(url, headers={"Range": "bytes=0-63", "Accept-Encoding": "identity",
+                                                               "User-Agent": UA})
+                    with opener.open(req, timeout=20) as r: r.read(64)
+                    item["file"] = round(time.time() - began, 1)
                 except Exception as e:
-                    item["error"] = "取地址：" + short(e if not (isinstance(e, urllib.error.HTTPError) and e.code == 403) else Forbidden())
+                    item["error"] = ("取文件：" if "address" in item else "取地址：") + short(e)
             out.append(item)
         return out

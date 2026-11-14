@@ -100,7 +100,8 @@ function renderSource(s, results) {
   const a = s.account;
   $("#istate").innerHTML = a.logged_in
     ? `<span class=ok>● 已登录</span> ${esc(a.nickname)}（${esc(a.user)}）` + (a.vip ? ` · ${esc(a.vip)} 还剩 ${a.vip_days} 天` : "") +
-      (a.auto_relogin ? " · 会话过期会自动重新登录" : "")
+      (a.auto_relogin ? " · 会话过期会自动重新登录" : "") +
+      (a.elsewhere ? `<br><span class=bad>注意：${esc(a.elsewhere)}</span>（官方客户端或麦动也登录着这个账号，同时用会互相挤下线）` : "")
     : `<span class=bad>● 没登录</span>，新歌下载不了` + (a.error ? `：${esc(a.error)}` : "");
   if (document.activeElement !== $("#iuser") && !$("#iuser").value) $("#iuser").value = a.user || "";
   $("#ilogout").disabled = !a.logged_in && !a.user;
@@ -114,7 +115,7 @@ function renderSource(s, results) {
     const last = r.ok && (!r.failed || r.ok > r.failed) ? `<span class=ok>上次取地址成功</span> ${ago(r.ok)}，${r.seconds} 秒`
       : r.failed ? `<span class=bad>上次失败</span> ${ago(r.failed)}：${esc(r.error)}` : "<span class=mute>还没用过</span>";
     const test = !t ? "" : t.error ? `<br><small class=bad>测试：${esc(t.error)}</small>`
-      : `<br><small class=ok>测试：连上 i歌霸 ${t.reach} 秒 · 出口 ${esc(t.exit)}${t.address != null ? ` · 取地址 ${t.address} 秒` : " · 登录后才能测取地址"}</small>`;
+      : `<br><small class=ok>测试：连上 i歌霸 ${t.reach} 秒 · 出口 ${esc(t.exit)}${t.address != null ? ` · 取地址 ${t.address} 秒 · 读文件 ${t.file} 秒` : " · 登录后才能测取地址和文件"}</small>`;
     return `<tr><td><code>${esc(r.route === "direct" ? "direct（直连）" : r.route)}</code></td><td>${last}${test}</td></tr>`;
   }).join("") + "</table>";
 }
