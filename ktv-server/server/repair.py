@@ -10,7 +10,7 @@ FFmpeg 能将就着播，ExoPlayer 读到就报错。旧版分段是 2 MiB 或 5
 import argparse, json, os, re, threading, time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import igeba_dl
+from . import igeba_dl, igeba_source
 from .catalog import Catalog
 
 STEP = 512 * 1024
@@ -22,24 +22,24 @@ def boundary_offsets(size):
     return sorted(offsets)
 
 
-def fetch_byte(url, offset):
+def fetch_byte(url, offset, opener=None):
     # 要 [offset, offset+1]：不包含右端点的歌源正好给 1 字节，包含的给 2 字节，都取第一个
-    start, body, _ = igeba_dl.fetch_range(url, offset, offset + 1, timeout=20)
+    start, body, _ = igeba_dl.fetch_range(url, offset, offset + 1, timeout=20, opener=opener)
     if start != offset or not body: raise RuntimeError(f"位置 {offset} 没取到数据")
     return body[:1]
 
 
-def repair_file(path, number, threads=32, attempts=4):
-    """返回 (检查的字节数, 改动的字节数)。"""
+def repair_file(path, number, source, threads=32, attempts=4):
+    """返回 (检查的字节数, 改动的字节数)。source 负责登录 i歌霸 和选线路。"""
     size = os.path.getsize(path)
     offsets = boundary_offsets(size)
-    url = igeba_dl.get_song_url(number)
+    url, opener = source.song_url(number)
     found, lock = {}, threading.Lock()
 
     def one(offset):
         for attempt in range(attempts):
             try:
-                value = fetch_byte(url, offset)
+                value = fetch_byte(url, offset, opener)
                 with lock: found[offset] = value
                 return
             except Exception:
@@ -73,6 +73,7 @@ def main(argv=None):
     names = sorted(n for n in os.listdir(a.media) if re.match(r"^\d+\.mkv$", n))
     if a.only: names = [n for n in names if n in set(a.only)]
     todo = [n for n in names if n not in done]
+    source = igeba_source.from_data_dir(a.data)
     print(f"共 {len(names)} 首，已修过 {len(names) - len(todo)} 首，这次修 {len(todo)} 首", flush=True)
     for i, name in enumerate(todo, 1):
         row = catalog.one("select number from source_songs where filename=?", (name,))
@@ -80,7 +81,7 @@ def main(argv=None):
             print(f"[{i}/{len(todo)}] {name}：曲库里找不到，跳过", flush=True); continue
         began = time.time()
         try:
-            checked, changed = repair_file(os.path.join(a.media, name), row[0])
+            checked, changed = repair_file(os.path.join(a.media, name), row[0], source)
         except Exception as e:
             print(f"[{i}/{len(todo)}] {name}：失败 {e}", flush=True); continue
         done.add(name)

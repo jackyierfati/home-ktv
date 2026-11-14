@@ -10,7 +10,8 @@ the TV, and search, request and skip songs on their phones, and see how many son
 on the NAS yet downloads automatically when someone requests it, and starts playing as soon as it's ready.
 
 > The 80,000-song catalog comes from the public API of i歌霸 (igeba), a Chinese karaoke service, so the songs and the
-> interface are in Chinese. This project does not ship any songs and is for personal, home, non-commercial use only.
+> interface are in Chinese. Downloading new songs needs your own i歌霸 account (i歌霸 requires a login since November
+> 2026). This project does not ship any songs and is for personal, home, non-commercial use only.
 
 ## Features
 
@@ -46,6 +47,10 @@ written for exactly that kind of connection:
 - Songs that guests request jump ahead of bulk downloads. The queue is saved to disk and resumes after a restart.
 - Downloads alone can go through a mainland-China exit (an optional WireGuard container is included); the rest of your
   home network is not affected.
+- Download routes can be changed on the admin page at any time: list several proxies or VPNs, tried in order, moving on
+  to the next when one can't get an address, with a direct connection as the last resort. A route that failed is
+  moved to the end for 10 minutes, and "test routes" shows each route's exit country and how long an address takes.
+- Once you log in to your i歌霸 account, the server logs in again by itself whenever the session expires.
 
 Measured abroad through a mainland-China exit: 0.3 to 1.8 MiB/s per song, so a typical 70 MB song takes a minute or two.
 
@@ -87,7 +92,8 @@ docker compose up -d
 ```
 
 1. Open `http://<this machine's IP>:8787/admin` → 「曲库与设置」(catalog and settings) → 「更新曲库」(update catalog),
-   and wait a few minutes.
+   and wait a few minutes. On the same page, log in to your i歌霸 account (registering needs a mainland-China mobile
+   number; you can register in the official i歌霸 app or in Maidong).
 2. On the admin page, enter your KTV's name under 「名字」; to let friends join the WiFi by scanning, enter the WiFi name
    and password too.
 3. Install the player on the TV (see [ktv-player/README.en.md](ktv-player/README.en.md)) and enter

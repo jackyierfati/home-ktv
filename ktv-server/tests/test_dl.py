@@ -1,7 +1,7 @@
-import os, shutil, threading, time, unittest
+import os, shutil, threading, time, unittest, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from server import igeba_dl
+from server import igeba_dl, igeba_source
 from tests.helpers import temp_dirs
 
 BLOB = bytes(range(256)) * 4096          # 1 MiB
@@ -41,22 +41,28 @@ class RangeServer:
         self.server.shutdown(); self.server.server_close()
 
 
+class FakeSource:
+    """地址固定是假 CDN 的；分段下载走不读代理的 opener。"""
+
+    def __init__(self, url):
+        self.url, self.opener = url, urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def song_url(self, number):
+        return self.url, self.opener
+
+
 class DownloadTest(unittest.TestCase):
     def setUp(self):
         self.root, _, self.media = temp_dirs()
-        self.old = (igeba_dl.CHUNK, igeba_dl.get_song_url, os.environ.get("no_proxy"))
+        self.old_chunk = igeba_dl.CHUNK
         igeba_dl.CHUNK = 64 * 1024
-        os.environ["no_proxy"] = "127.0.0.1,localhost"
 
     def tearDown(self):
-        igeba_dl.CHUNK, igeba_dl.get_song_url, no_proxy = self.old
-        if no_proxy is None: os.environ.pop("no_proxy", None)
-        else: os.environ["no_proxy"] = no_proxy
+        igeba_dl.CHUNK = self.old_chunk
         shutil.rmtree(self.root, ignore_errors=True)
 
     def download(self, server, **kw):
-        igeba_dl.get_song_url = lambda number: server.url
-        return igeba_dl.download_song("1", "歌", "歌手", "1.mkv", self.media, 8, **kw)
+        return igeba_dl.download_song("1", "歌", "歌手", "1.mkv", self.media, 8, source=FakeSource(server.url), **kw)
 
     def test_a_stalled_chunk_is_raced_instead_of_waiting_for_the_timeout(self):
         server = RangeServer(stall={5 * 64 * 1024})
@@ -105,9 +111,8 @@ class ExclusiveRangeTest(DownloadTest):
         path = os.path.join(self.media, "1.mkv")
         with open(path, "wb") as f: f.write(broken)
         server = RangeServer(exclusive=True)
-        igeba_dl.get_song_url = lambda number: server.url
         try:
-            checked, changed = repair.repair_file(path, "1", threads=4)
+            checked, changed = repair.repair_file(path, "1", FakeSource(server.url), threads=4)
         finally:
             server.close()
         self.assertEqual(len(repair.boundary_offsets(len(BLOB))), checked)
@@ -118,32 +123,34 @@ class ExclusiveRangeTest(DownloadTest):
     test_cancel_removes_the_partial_file = None
 
 
-class AddressTest(unittest.TestCase):
-    def setUp(self):
-        self.old = igeba_dl._get_song_url_once
-
-    def tearDown(self):
-        igeba_dl._get_song_url_once = self.old
+class RaceTest(unittest.TestCase):
+    """地址接口偶尔几十秒不回：隔一会儿再并发发一个，谁先回来用谁。"""
 
     def test_a_hanging_address_request_is_raced(self):
         calls = []
 
-        def once(number, timeout):
-            calls.append(number)
+        def once():
+            calls.append(1)
             if len(calls) == 1: time.sleep(5); return "http://slow"
             return "http://fast"
 
-        igeba_dl._get_song_url_once = once
         began = time.time()
-        self.assertEqual("http://fast", igeba_dl.get_song_url("1", stagger=0.2, timeout=5))
+        self.assertEqual("http://fast", igeba_source.race(once, stagger=0.2, timeout=5))
         self.assertLess(time.time() - began, 2)
 
     def test_gives_up_after_every_attempt_fails(self):
-        def once(number, timeout): raise RuntimeError("歌源拒绝")
+        def once(): raise RuntimeError("歌源拒绝")
 
-        igeba_dl._get_song_url_once = once
-        with self.assertRaisesRegex(RuntimeError, "6 次.*歌源拒绝"):
-            igeba_dl.get_song_url("1", stagger=0.05, timeout=1)
+        with self.assertRaisesRegex(igeba_source.SourceError, "4 次.*歌源拒绝"):
+            igeba_source.race(once, stagger=0.05, timeout=1)
+
+    def test_403_stops_right_away(self):
+        def once(): raise urllib.error.HTTPError("http://x", 403, "Forbidden", {}, None)
+
+        began = time.time()
+        with self.assertRaises(igeba_source.Forbidden):
+            igeba_source.race(once, stagger=1, timeout=5)
+        self.assertLess(time.time() - began, 0.5)
 
 
 if __name__ == "__main__":

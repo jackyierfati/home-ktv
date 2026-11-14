@@ -215,6 +215,35 @@ class TvModeTest(AppBase):
         self.wait_for(lambda: (self.call("GET", "/api/player/state")[1]["current"] or {}).get("number") == "10006055")
         with open(os.path.join(self.media, "210006055.mkv"), "rb") as f: self.assertEqual(b"new mkv", f.read())
 
+    def test_igeba_login_from_the_admin_page_never_returns_the_password(self):
+        from server import igeba_source
+        from tests.helpers import FakeIgeba
+        igeba = FakeIgeba()
+        settings = self.ktv.settings
+        self.ktv.source = igeba_source.Source(
+            self.data, lambda: (settings.get("igeba_user") or "", settings.get("igeba_password") or ""),
+            self.ktv.download_routes, address_url=igeba.url)
+        try:
+            code, s = self.call("GET", "/admin/source")
+            self.assertEqual((False, True), (s["account"]["logged_in"], s["routes_default"]))
+            self.assertFalse(self.call("GET", "/api/tv/state")[1]["nas"]["account"])      # 电视上提示没登录
+            self.assertEqual(400, self.call("POST", "/admin/igeba/login", {"user": "u", "password": "bad"})[0])
+            code, s = self.call("POST", "/admin/igeba/login", {"user": "u", "password": "p"})
+            self.assertEqual((200, True, "小王"), (code, s["account"]["logged_in"], s["account"]["nickname"]))
+            self.assertEqual("p", settings.get("igeba_password"))                         # 存着，自动重新登录要用
+            for path in ("/admin/settings", "/admin/source"):
+                self.assertNotIn('"p"', json.dumps(self.call("GET", path)[1]))           # 但不回给浏览器
+            self.assertEqual("http://cdn/1.mkv", self.ktv.source.song_url("1", stagger=0.2, timeout=3)[0])
+            self.assertEqual(400, self.call("PUT", "/admin/settings", {"download_routes": "igeba-vpn:8888"})[0])
+            code, s = self.call("PUT", "/admin/settings", {"download_routes": "http://igeba-vpn:8888/\n直连"})
+            self.assertEqual("http://igeba-vpn:8888\ndirect", s["download_routes"])
+            self.assertEqual(["http://igeba-vpn:8888", "direct"], [r["route"] for r in self.call("GET", "/admin/source")[1]["routes"]])
+            code, s = self.call("POST", "/admin/igeba/logout", {})
+            self.assertFalse(s["account"]["logged_in"])
+            self.assertEqual("", settings.get("igeba_password"))
+        finally:
+            igeba.close()
+
     def test_media_supports_ranges(self):
         with open(os.path.join(self.media, "220019055.mkv"), "wb") as f: f.write(b"0123456789")
         req = urllib.request.Request(self.base + "/media/20019055", headers={"Range": "bytes=2-5"})

@@ -1,4 +1,4 @@
-import json, os, sqlite3, tempfile, threading
+import json, os, sqlite3, tempfile, threading, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from server.catalog import SCHEMA
@@ -115,3 +115,57 @@ def temp_dirs():
     data, media = os.path.join(root, "data"), os.path.join(root, "media")
     os.makedirs(data); os.makedirs(media)
     return root, data, media
+
+
+class FakeIgeba:
+    """模拟 2026-11 以后的 i歌霸 地址接口：不是官方客户端的 User-Agent、没登录、会话过期都返回 403。
+    账号 u / 密码 p，UserId 42。expire() 让当前会话失效；deny=True 时取地址一直 403。"""
+
+    def __init__(self):
+        self.logins, self.addresses, self.sid, self.deny = 0, 0, None, False
+        fake = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+
+            def reply(self, code, obj=None, cookie=None):
+                body = json.dumps(obj, ensure_ascii=False).encode() if obj is not None else b""
+                self.send_response(code)
+                if cookie: self.send_header("Set-Cookie", cookie)
+                self.send_header("Content-Length", str(len(body))); self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                self.reply(200)
+
+            def do_POST(self):
+                from server.igeba_source import UA
+                form = urllib.parse.parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode())
+                cmd, params = form["CMD"][0], json.loads(form["PARAMS"][0])
+                if self.headers.get("User-Agent") != UA: return self.reply(403)
+                if cmd == "DO_LOGIN":
+                    fake.logins += 1
+                    if (params.get("UserName"), params.get("Password")) != ("u", "p"):
+                        return self.reply(200, {"Code": -1, "Reason": "密码错误", "UserInfo": {"UserId": 0}})
+                    fake.sid = f"s{fake.logins}"
+                    return self.reply(200, {"Code": 1, "UserInfo": {"UserId": 42, "NickName": "小王",
+                                                                     "Vip": {"VipName": "", "RemainDays": 0}}},
+                                      cookie=f"PHPSESSID={fake.sid}; Path=/")
+                if cmd == "GET_SONGADDR":
+                    fake.addresses += 1
+                    cookie = self.headers.get("Cookie") or ""
+                    if fake.deny or not fake.sid or f"PHPSESSID={fake.sid}" not in cookie or params.get("UserId") != 42:
+                        return self.reply(403)
+                    return self.reply(200, {"Result": 0, "Rights": {"Code": 0}, "FileUrl": f"http://cdn/{params['SongNumber']}.mkv"})
+                self.reply(404)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}/telnet.php"
+
+    def expire(self):
+        self.sid = None
+
+    def close(self):
+        self.server.shutdown(); self.server.server_close()

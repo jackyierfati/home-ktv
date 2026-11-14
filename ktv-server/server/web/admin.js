@@ -89,6 +89,39 @@ async function refreshQueue() {
 }
 
 function when(ts) { return ts ? new Date(ts * 1000).toLocaleString() : ""; }
+function ago(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  return s < 60 ? "刚刚" : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : s < 86400 ? `${Math.floor(s / 3600)} 小时前` : when(ts);
+}
+
+// ---------- i歌霸 账号和下载线路 ----------
+function renderSource(s, results) {
+  const a = s.account;
+  $("#istate").innerHTML = a.logged_in
+    ? `<span class=ok>● 已登录</span> ${esc(a.nickname)}（${esc(a.user)}）` + (a.vip ? ` · ${esc(a.vip)} 还剩 ${a.vip_days} 天` : "") +
+      (a.auto_relogin ? " · 会话过期会自动重新登录" : "")
+    : `<span class=bad>● 没登录</span>，新歌下载不了` + (a.error ? `：${esc(a.error)}` : "");
+  if (document.activeElement !== $("#iuser") && !$("#iuser").value) $("#iuser").value = a.user || "";
+  $("#ilogout").disabled = !a.logged_in && !a.user;
+  if (document.activeElement !== $("#routes")) {
+    $("#routes").value = s.routes_default ? "" : s.routes.map((r) => r.route).join("\n");
+    $("#routes").placeholder = s.routes.map((r) => r.route).join("\n") + "\n（空着就按这个顺序）";
+  }
+  const tested = Object.fromEntries((results || []).map((r) => [r.route, r]));
+  $("#rtstate").innerHTML = "<table>" + s.routes.map((r) => {
+    const t = tested[r.route];
+    const last = r.ok && (!r.failed || r.ok > r.failed) ? `<span class=ok>上次取地址成功</span> ${ago(r.ok)}，${r.seconds} 秒`
+      : r.failed ? `<span class=bad>上次失败</span> ${ago(r.failed)}：${esc(r.error)}` : "<span class=mute>还没用过</span>";
+    const test = !t ? "" : t.error ? `<br><small class=bad>测试：${esc(t.error)}</small>`
+      : `<br><small class=ok>测试：连上 i歌霸 ${t.reach} 秒 · 出口 ${esc(t.exit)}${t.address != null ? ` · 取地址 ${t.address} 秒` : " · 登录后才能测取地址"}</small>`;
+    return `<tr><td><code>${esc(r.route === "direct" ? "direct（直连）" : r.route)}</code></td><td>${last}${test}</td></tr>`;
+  }).join("") + "</table>";
+}
+
+async function loadSource() {
+  try { renderSource(await api("/admin/source")); } catch (e) { $("#istate").textContent = e.message; }
+}
 async function loadSystem(remote) {
   try {
     const c = await api("/admin/catalog" + (remote ? "?remote=1" : ""));
@@ -98,6 +131,7 @@ async function loadSystem(remote) {
     $("#cstate").textContent = c.running ? `更新中 ${c.progress}%` : c.error ? "上次失败：" + c.error : c.finished ? "上次更新完成于 " + when(c.finished) : "空闲";
     $("#cupdate").disabled = c.running;
     if (c.running) setTimeout(() => loadSystem(false), 2000);
+    loadSource();
     const s = await api("/admin/settings");
     if (document.activeElement !== $("#player")) $("#player").value = s.player_url || "";
     if (document.activeElement !== $("#pmode")) $("#pmode").value = s.player_mode || "tv";
@@ -140,6 +174,30 @@ document.addEventListener("click", async (e) => {
   if (b.id === "ccheck") loadSystem(true);
   if (b.id === "cupdate" && confirm("从 i歌霸重新拉取整个曲库？大约需要几分钟。")) {
     try { await api("/admin/catalog/update", {}); toast("开始更新曲库"); loadSystem(false); } catch (x) { toast(x.message); }
+  }
+  if (b.id === "ilogin") {
+    const user = $("#iuser").value.trim(), password = $("#ipass").value;
+    if (!user || !password) return toast("请输入 i歌霸 账号和密码");
+    b.disabled = true; b.textContent = "登录中…";
+    try {
+      renderSource(await api("/admin/igeba/login", { user, password }));
+      $("#ipass").value = "";
+      toast("登录成功，可以点上面「重试失败」把下载失败的歌再下一遍");
+    } catch (x) { toast(x.message); loadSource(); }
+    finally { b.disabled = false; b.textContent = "登录"; }
+  }
+  if (b.id === "ilogout" && confirm("退出 i歌霸 账号？NAS 上存的账号密码也会删掉，新歌就下载不了了。")) {
+    try { renderSource(await api("/admin/igeba/logout", {})); $("#iuser").value = ""; toast("已退出"); } catch (x) { toast(x.message); }
+  }
+  if (b.id === "rtsave") {
+    try { await api("/admin/settings", { download_routes: $("#routes").value }, "PUT"); $("#routes").blur(); loadSource(); toast("线路已保存，下一首歌开始生效"); }
+    catch (x) { toast(x.message); }
+  }
+  if (b.id === "rttest") {
+    b.disabled = true; b.textContent = "测试中…（每条线路最多半分钟）";
+    try { const r = await api("/admin/routes/test", {}); renderSource(r, r.results); }
+    catch (x) { toast(x.message); }
+    finally { b.disabled = false; b.textContent = "测试线路"; }
   }
   if (b.id === "rsave") {
     try { await api("/admin/settings", { room_name: $("#rname").value.trim() }, "PUT"); toast("已保存，电视和手机几秒内会更新"); }

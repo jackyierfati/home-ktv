@@ -15,15 +15,23 @@ igeba_dl.py — i歌霸 曲库多线程下载器（纯标准库，任何 Python 
   --threads N      每首歌并行连接数，默认 64（越多越快，实测 48 明显优于 16）
   --parallel N     同时下几首，默认 2
   --db PATH        曲库数据库路径，默认脚本同目录的 igeba_catalog.db（没有会自动从 Gitee 下）
+  --data DIR       服务端的 data 目录：从里面的 config.json 读 i歌霸 账号和下载线路（默认是 --db 所在目录）
+
+下载要登录 i歌霸 账号：在服务端管理页登录过就行（用 --data 指过去），
+或者设环境变量 KTV_IGEBA_USER / KTV_IGEBA_PASSWORD。
 """
-import argparse, json, os, queue, random, sqlite3, sys, threading, time, urllib.request, urllib.parse
+import argparse, os, sqlite3, threading, time, urllib.request
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 
-ADDRESS_URL = "http://app.ige8.net/telnet.php"
+try:
+    from . import igeba_source
+except ImportError:                     # 直接当脚本跑：python3 server/igeba_dl.py ...
+    import igeba_source
+
 DB_URL = "https://gitee.com/yangyachao-X/maidong-ktv/raw/feature/igeba-media/app/src/main/assets/igeba_catalog.db"
 # CDN 只接受 ≤2 MiB 的 Range，大了 403。分段越小，同时用上的连接越多，最后几段拖尾也越短。
 CHUNK = min(2048, int(os.environ.get("KTV_CHUNK_KIB", "512"))) * 1024
-UA = "Mozilla/5.0 (Linux; Android 12; TV) MaidongKTV"
+UA = igeba_source.UA
 
 # ---------- 曲库 ----------
 def ensure_db(path):
@@ -77,45 +85,13 @@ def resolve_targets(con, a):
     return out[:a.limit] if a.limit else out
 
 # ---------- 接口 ----------
-def get_song_url(number, attempts=6, stagger=5, timeout=20):
-    """地址接口（telnet.php）平时 2 秒左右，偶尔几十秒不回：
-    每 stagger 秒没结果就再并发发一个请求（最多 attempts 个），谁先成功用谁。"""
-    results = queue.Queue()
-    def one():
-        try: results.put((True, _get_song_url_once(number, timeout)))
-        except Exception as e: results.put((False, e))
-    sent, failed, last = 0, 0, None
-    deadline = time.time() + attempts * stagger + timeout
-    while failed < attempts and time.time() < deadline:
-        if sent < attempts and sent - failed < 3:            # 同时最多 3 个请求在路上
-            threading.Thread(target=one, daemon=True).start(); sent += 1
-        try:
-            ok, value = results.get(timeout=stagger if sent < attempts else max(0.1, deadline - time.time()))
-        except queue.Empty:
-            continue
-        if ok: return value
-        failed, last = failed + 1, value
-    raise RuntimeError(f"地址接口失败（{failed} 次）: {last or '超时'}")
-
-def _get_song_url_once(number, timeout=30):
-    form = {"VER": "10.0", "CMD": "GET_SONGADDR",
-            "PARAMS": json.dumps({"UserId": random.randint(100000, 999999), "SongNumber": number})}
-    data = urllib.parse.urlencode(form).encode()
-    req = urllib.request.Request(ADDRESS_URL, data=data, headers={
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        j = json.loads(r.read().decode("utf-8"))
-    if j.get("Result", 0) < 0 or j.get("Rights", {}).get("Code") not in (0, 1):
-        raise RuntimeError(j.get("Description") or j.get("Rights", {}).get("Reason") or "歌源拒绝")
-    url = j["FileUrl"]
-    if not url.startswith("http"): raise RuntimeError("未返回播放地址")
-    return url
-
-def fetch_range(url, start, end, on_data=None, timeout=60):
-    """请求 [start, end]（按 HTTP 标准含两端）。返回 (实际起点, 数据)。on_data(n) 每收到一块数据调用一次。"""
+# 取地址（要登录 i歌霸 账号、可以有多条线路）在 igeba_source.py；这里只管按 Range 下数据。
+def fetch_range(url, start, end, on_data=None, timeout=60, opener=None):
+    """请求 [start, end]（按 HTTP 标准含两端）。返回 (实际起点, 数据)。on_data(n) 每收到一块数据调用一次。
+    opener 决定走哪条线路（取到这首歌地址的那条）；不给就按 http_proxy 环境变量。"""
     req = urllib.request.Request(url, headers={"Range": f"bytes={start}-{end}",
                                                "Accept-Encoding": "identity", "User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with (opener.open if opener else urllib.request.urlopen)(req, timeout=timeout) as r:
         cr = r.headers.get("Content-Range", "")
         pieces = []
         while True:
@@ -132,8 +108,8 @@ def fetch_range(url, start, end, on_data=None, timeout=60):
             if tot.isdigit(): total = int(tot)
         return actual_start, body, total
 
-def probe(url):
-    _, body, total = fetch_range(url, 0, 62)
+def probe(url, opener=None):
+    _, body, total = fetch_range(url, 0, 62, opener=opener)
     if total is None: raise RuntimeError("服务器没返回 Content-Range，无法分段")
     return total
 
@@ -141,9 +117,12 @@ def probe(url):
 class Cancelled(Exception):
     pass
 
-def download_song(number, name, singer, filename, outdir, threads, on_progress=None, should_stop=None, replace=False):
-    """on_progress(done_bytes, total_bytes, mib_per_s) 可选；should_stop() 返回 True 时中止并抛 Cancelled。
+def download_song(number, name, singer, filename, outdir, threads, on_progress=None, should_stop=None, replace=False,
+                  source=None):
+    """source：igeba_source.Source，负责登录账号、按线路取地址。
+    on_progress(done_bytes, total_bytes, mib_per_s) 可选；should_stop() 返回 True 时中止并抛 Cancelled。
     replace：文件已经有了也重新下（坏了的歌）；新文件下完整才替换旧的，失败时旧的还在。"""
+    if source is None: raise ValueError("download_song 需要 source（i歌霸 账号和下载线路）")
     dest = os.path.join(outdir, filename)
     part = dest + ".part"
     lockp = dest + ".lock"
@@ -159,29 +138,28 @@ def download_song(number, name, singer, filename, outdir, threads, on_progress=N
     except OSError:
         pass
     try:
-        return _download_locked(number, name, singer, filename, dest, part, lockp, threads, on_progress, should_stop)
+        return _download_locked(number, name, singer, filename, dest, part, lockp, threads, on_progress, should_stop, source)
     finally:
         try: os.remove(lockp)
         except OSError: pass
 
-def _download_locked(number, name, singer, filename, dest, part, lockp, threads, on_progress, should_stop):
+def _download_locked(number, name, singer, filename, dest, part, lockp, threads, on_progress, should_stop, source):
     try:
-        url = get_song_url(number)
-        total = probe(url)
+        url, opener = source.song_url(number)          # 哪条线路取到的地址，分段也走哪条
+        total = probe(url, opener)
     except Exception as e:
         print(f"[失败] {name}/{singer} 取地址: {e}")
         raise
-    url_box = [url]            # 分段大面积超时/403 时重新取链接
+    url_box = [(url, opener)]  # 分段大面积超时/403 时重新取链接（可能换了线路）
     url_lock = threading.Lock()
     def refresh_url(bad):
         with url_lock:
-            if url_box[0] != bad: return url_box[0]
+            if url_box[0][0] != bad: return
             try:
-                url_box[0] = get_song_url(number)
+                url_box[0] = source.song_url(number)
                 print(f"  {name}/{singer}: 已重新获取下载地址")
             except Exception as e:
                 print(f"  {name}/{singer}: 重新取地址失败 {e}")
-            return url_box[0]
 
     if should_stop and should_stop(): raise Cancelled()
     covered = [False] * ((total + CHUNK - 1) // CHUNK)
@@ -215,7 +193,7 @@ def _download_locked(number, name, singer, filename, dest, part, lockp, threads,
         for attempt in range(6):
             if i in finished: return True
             if should_stop and should_stop(): raise Cancelled()
-            url = url_box[0]
+            url, opener = url_box[0]
             got = [0]
             def on_data(n):
                 if i in finished: raise Superseded()          # 另一路已经下完这段
@@ -228,7 +206,7 @@ def _download_locked(number, name, singer, filename, dest, part, lockp, threads,
                 # 两种服务器都能拿全；不够长就当失败重试，不能留下空字节。
                 # 卡住的连接 20 秒没数据就换一条，不等 60 秒。
                 need = end - start + 1
-                a_start, body, _ = fetch_range(url, start, end + 1, on_data, timeout=20)
+                a_start, body, _ = fetch_range(url, start, end + 1, on_data, timeout=20, opener=opener)
                 if a_start != start: raise RuntimeError(f"返回的起点不对：{a_start}")
                 if len(body) < need: raise RuntimeError(f"数据不全：{len(body)}/{need}")
                 body = body[:need]
@@ -299,10 +277,10 @@ def cmd_get(con, a):
     if not targets:
         print("没有要下载的歌"); return
     print(f"准备下载 {len(targets)} 首到 {a.out}，每首 {a.threads} 线程，同时 {a.parallel} 首")
-    okc = 0
+    source = igeba_source.from_data_dir(a.data or os.path.dirname(os.path.abspath(a.db)))
     def safe(*args):
-        try: return download_song(*args)
-        except Exception: return False
+        try: return download_song(*args, source=source)
+        except Exception as e: print(f"[失败] {args[1]}/{args[2]}: {e}"); return False
     def run(batch):
         done = []
         with ThreadPoolExecutor(max_workers=max(1, a.parallel)) as ex:
@@ -321,6 +299,7 @@ def cmd_get(con, a):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--db", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "igeba_catalog.db"))
+    p.add_argument("--data", help="服务端的 data 目录（读 i歌霸 账号和下载线路）")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("search"); s.add_argument("query"); s.add_argument("--singer")
     sub.add_parser("playlists")

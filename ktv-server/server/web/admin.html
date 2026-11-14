@@ -27,6 +27,9 @@ h2{font-size:16px;margin:18px 0 8px}.mute{color:var(--mute)}.hidden{display:none
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0 0 12px}dt{color:var(--mute)}dd{margin:0}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:8px;opacity:0;transition:.2s;pointer-events:none}
 #toast.show{opacity:.92}
+textarea{font:13px/1.5 ui-monospace,Consolas,monospace;width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);resize:vertical}
+code{font-size:13px;background:var(--line);padding:0 4px;border-radius:4px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+#rtstate table{margin-top:10px}
 </style>
 </head>
 <body>
@@ -44,6 +47,13 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0 0 12
 <h2>曲库</h2><div class=card><dl><dt>本地版本</dt><dd id=cver>…</dd><dt>歌曲数</dt><dd id=csongs>…</dd><dt>i歌霸最新</dt><dd id=cremote>未查询</dd><dt>状态</dt><dd id=cstate>…</dd></dl>
 <div class=acts><button id=ccheck>查询最新版本</button><button class=primary id=cupdate>更新曲库</button></div>
 <p class=mute>更新会从 i歌霸重新拉取整个曲库，大约需要几分钟；完成前旧曲库照常可用。</p></div>
+<h2>i歌霸 账号</h2><div class=card><p id=istate class=mute>…</p>
+<div class=row><input id=iuser autocomplete=username placeholder="i歌霸 账号（手机号）"><input id=ipass type=password autocomplete=current-password placeholder="密码"><button class=primary id=ilogin>登录</button><button id=ilogout>退出</button></div>
+<p class=mute>2026 年 11 月起，i歌霸 只给登录了的账号下歌；没登录时新歌都下载失败（HTTP 403），已经下好的歌照常能唱。注册要中国大陆手机号，可以在 i歌霸 官方 App 或麦动里注册。账号密码存在 NAS 的 data/config.json 里，会话过期时自动重新登录，网页上不会再显示密码。</p></div>
+<h2>下载线路</h2><div class=card><textarea id=routes rows=4 spellcheck=false placeholder="http://igeba-vpn:8888&#10;direct"></textarea>
+<div class=acts><button class=primary id=rtsave>保存</button><button id=rttest>测试线路</button></div>
+<div id=rtstate></div>
+<p class=mute>一行一条，按顺序试：代理或 VPN 写 <code>http://地址:端口</code>，<code>direct</code> 是不走代理直连。一条线路取不到地址就换下一条，失败过的线路 10 分钟内排到最后；一首歌用哪条线路取到地址，分段下载也走哪条。空着就用 .env 里的 KTV_PROXY，再直连。</p></div>
 <h2>名字</h2><div class=card><div class=row><input id=rname maxlength=20 placeholder="电视主页和点歌页上显示的名字，比如 Jack 家庭KTV"><button class=primary id=rsave>保存</button></div></div>
 <h2>电视主页的 WiFi 二维码</h2><div class=card><div class=row><input id=wssid placeholder="WiFi 名称（不填就不显示 WiFi 二维码）"><input id=wpass type=password placeholder="WiFi 密码"><select id=wsec><option value=WPA>WPA/WPA2/WPA3</option><option value=WEP>WEP</option><option value=nopass>不用密码</option></select><button class=primary id=wsave>保存</button></div>
 <p class=mute>朋友用手机相机扫电视上的“连 WiFi”码就能直接连上，不用再问密码。</p></div>

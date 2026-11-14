@@ -5,7 +5,7 @@
 import argparse, json, os, re, sys, threading, time, traceback, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import catalog as catalog_mod, igeba_api, igeba_dl
+from . import catalog as catalog_mod, igeba_api, igeba_dl, igeba_source
 from .catalog import Catalog
 from .jobs import Jobs, NUM_RE
 from .player import MaidongBridge, PlayerError, song_number
@@ -30,10 +30,14 @@ class Settings:
     # room_name：电视主页和点歌页上的名字，比如“Jack 家庭KTV”
     # player_mode：tv = 服务端自己管已点，电视装 Home KTV 播放器；maidong = 点歌转给电视上的麦动（player_url）
     # wifi_*：电视主页上“连 WiFi”二维码用的网络名和密码
+    # igeba_*：i歌霸 账号（2026-11 起取歌曲地址要登录）；密码留着是为了会话过期时自动重新登录
+    # download_routes：下载线路，一行一个（代理地址或 direct），空着就用 http_proxy 环境变量再直连
     DEFAULTS = {"room_name": os.environ.get("KTV_NAME", "家庭KTV"),
                 "player_url": os.environ.get("KTV_PLAYER_URL", ""),
                 "player_mode": os.environ.get("KTV_PLAYER_MODE", "tv"),
-                "wifi_ssid": "", "wifi_password": "", "wifi_security": "WPA"}
+                "wifi_ssid": "", "wifi_password": "", "wifi_security": "WPA",
+                "igeba_user": "", "igeba_password": "", "download_routes": ""}
+    SECRET = ("igeba_password",)                    # 不回给浏览器
 
     def __init__(self, path):
         self.path, self.lock = path, threading.Lock()
@@ -49,10 +53,13 @@ class Settings:
     def update(self, values):
         with self.lock:
             for key in self.DEFAULTS:
-                if key in values: self.values[key] = str(values[key]).strip()
+                if key in values: self.values[key] = str(values[key]) if key in self.SECRET else str(values[key]).strip()
             with open(self.path + ".tmp", "w", encoding="utf-8") as f: json.dump(self.values, f, ensure_ascii=False)
             os.replace(self.path + ".tmp", self.path)
-        return dict(self.values)
+        return self.public()
+
+    def public(self):
+        return {k: v for k, v in self.values.items() if k not in self.SECRET}
 
 
 class Updater:
@@ -97,10 +104,13 @@ class Ktv:
         self.catalog = Catalog(os.path.join(data_dir, "igeba_catalog.db"))
         self.settings = Settings(os.path.join(data_dir, "config.json"))
         self.player = MaidongBridge(lambda: self.settings.get("player_url"))
+        self.source = igeba_source.Source(
+            data_dir, lambda: (self.settings.get("igeba_user") or "", self.settings.get("igeba_password") or ""),
+            self.download_routes)
         if download is None:
             def download(number, name, singer, fn, outdir, on_progress, should_stop, replace=False):
-                return igeba_dl.download_song(number, name, singer, fn, outdir, threads,
-                                              on_progress=on_progress, should_stop=should_stop, replace=replace)
+                return igeba_dl.download_song(number, name, singer, fn, outdir, threads, on_progress=on_progress,
+                                              should_stop=should_stop, replace=replace, source=self.source)
         self.media_dir = media_dir
         self.tv = Room(os.path.join(data_dir, "room.json"), self.catalog.lookup, self.is_ready)
         self.jobs = Jobs(self.catalog.lookup, media_dir, os.path.join(data_dir, "agent_state.json"),
@@ -109,6 +119,9 @@ class Ktv:
 
     def tv_mode(self):
         return self.settings.get("player_mode") == "tv"
+
+    def download_routes(self):
+        return igeba_source.parse_routes(self.settings.get("download_routes"), igeba_source.default_routes())
 
     def stats(self):
         """电视主页上显示的曲库和 NAS 歌曲数，每分钟统计一次。"""
@@ -135,7 +148,8 @@ class Ktv:
         downloading = [j for j in jobs if j["state"] == "downloading"]
         done = [j for j in jobs if j["state"] == "done" and j.get("finished")]
         latest = max(done, key=lambda j: j["finished"], default=None)
-        return {"online": True, "speed": round(sum(j.get("speed_mib") or 0 for j in downloading), 2),
+        return {"online": True, "account": bool(self.source.account.user_id),
+                "speed": round(sum(j.get("speed_mib") or 0 for j in downloading), 2),
                 "downloading": [{"name": j["name"], "singer": j["singer"], "progress": j["progress"]} for j in downloading],
                 "latest": latest and {"name": latest["name"], "singer": latest["singer"], "t": latest["finished"]}}
 
@@ -442,7 +456,7 @@ def admin_catalog_update(k, m, qs, data):
 
 @route("GET", "/admin/settings")
 def admin_settings(k, m, qs, data):
-    return dict(k.settings.values)
+    return k.settings.public()
 
 
 @route("PUT", "/admin/settings")
@@ -464,7 +478,52 @@ def admin_settings_put(k, m, qs, data):
     if "wifi_security" in data:
         if data["wifi_security"] not in ("WPA", "WEP", "nopass"): raise ApiError(400, "WiFi 加密方式不对")
         values["wifi_security"] = data["wifi_security"]
+    if "download_routes" in data:
+        routes = igeba_source.parse_routes(data["download_routes"])
+        if len(routes) > 8: raise ApiError(400, "线路最多 8 条")
+        for route in routes:
+            try: igeba_source.check_route(route)
+            except ValueError as e: raise ApiError(400, str(e))
+        values["download_routes"] = "\n".join(routes)
     return k.settings.update(values)
+
+
+# ---- i歌霸 账号和下载线路
+def source_status(k):
+    return {"account": k.source.account.status(), "routes": k.source.routes.status(),
+            "routes_default": not igeba_source.parse_routes(k.settings.get("download_routes"))}
+
+
+@route("GET", "/admin/source")
+def admin_source(k, m, qs, data):
+    return source_status(k)
+
+
+@route("POST", "/admin/igeba/login")
+def igeba_login(k, m, qs, data):
+    """管理页登录 i歌霸：登上了才把账号密码存进设置（会话过期时自动重新登录要用）。"""
+    user, password = str(data.get("user") or "").strip(), str(data.get("password") or "")
+    if not user or not password: raise ApiError(400, "请输入 i歌霸 账号和密码")
+    try:
+        k.source.login(user, password)
+    except igeba_source.LoginError as e:
+        raise ApiError(400, str(e))
+    except igeba_source.SourceError as e:
+        raise ApiError(502, f"{e}（检查下载线路）")
+    k.settings.update({"igeba_user": user, "igeba_password": password})
+    return source_status(k)
+
+
+@route("POST", "/admin/igeba/logout")
+def igeba_logout(k, m, qs, data):
+    k.source.account.logout()
+    k.settings.update({"igeba_user": "", "igeba_password": ""})
+    return source_status(k)
+
+
+@route("POST", "/admin/routes/test")
+def routes_test(k, m, qs, data):
+    return {"results": k.source.test_routes(), **source_status(k)}
 
 
 # ---- 兼容麦动和旧管理页的下载接口（v2）

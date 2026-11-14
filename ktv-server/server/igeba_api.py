@@ -2,7 +2,7 @@
 import json, urllib.parse, urllib.request
 
 CLOUD_URL = "http://app.ige8.net/cloud.php"
-UA = "Mozilla/5.0 (Linux; Android 12; TV) MaidongKTV"
+UA = "Mozilla/3.0 (compatible; Indy Library)"     # 和 igeba_source.UA 一样，用官方客户端的
 
 
 def post(command, params, timeout=40):

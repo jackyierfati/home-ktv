@@ -30,9 +30,10 @@ Then:
 
 1. Open `http://<this machine's IP>:8787/admin` → 「曲库与设置」(catalog and settings) → 「更新曲库」(update catalog).
    The catalog has over 80,000 songs, so the first update takes a few minutes.
-2. On the same page, fill in 「名字」(name) and, optionally, the WiFi details; the TV home screen then also shows a
+2. On the same page, log in to your i歌霸 account, see "i歌霸 account" below.
+3. On the same page, fill in 「名字」(name) and, optionally, the WiFi details; the TV home screen then also shows a
    「连 WiFi」(join WiFi) QR code.
-3. Install the player on the TV, see [ktv-player/README.en.md](../ktv-player/README.en.md).
+4. Install the player on the TV, see [ktv-player/README.en.md](../ktv-player/README.en.md).
 
 To check:
 
@@ -41,6 +42,41 @@ curl http://127.0.0.1:8787/health          # {"ok": true, "version": "3"}
 docker logs --tail 50 home-ktv
 ```
 
+## i歌霸 account
+
+Since November 2026, i歌霸 only returns song addresses to logged-in accounts. Without a login, every new download
+fails (HTTP 403); songs already downloaded still play.
+
+- Registering needs a mainland-China mobile number to receive an SMS code; you can register in the official i歌霸 app
+  or in Maidong.
+- Log in on the admin page under 「曲库与设置 → i歌霸 账号」(i歌霸 account). The account and password are stored in
+  `data/config.json` (the password is never shown on the page again); the session is stored in
+  `data/igeba_session.json` and `data/igeba_cookies.txt`, so a restart doesn't need a new login.
+- When the session expires, the address request gets a 403; the server then logs in again once with the stored
+  password and retries (at most one login per minute).
+- Without a login, the TV home screen's status bar shows 「i歌霸 账号没登录 新歌下载不了」(i歌霸 account not logged in,
+  new songs can't download).
+- If the same account is also logged in on Maidong or the official app at the same time, they may log each other out;
+  check this first if 403s keep coming back.
+
+## Download routes
+
+On the admin page under 「曲库与设置 → 下载线路」(download routes), one route per line, tried in order:
+
+```
+http://igeba-vpn:8888
+http://192.168.1.20:8888
+direct
+```
+
+- Proxies or VPNs are written as `http://<address>:<port>`; `direct` means no proxy.
+- When a route can't get an address (can't connect, timeout, 403), the next one is tried; a route that failed is moved
+  to the end for 10 minutes.
+- Whichever route got a song's address also downloads that song's pieces.
+- When the list is empty, `KTV_PROXY` from `.env` is used, then a direct connection.
+- 「测试线路」(test routes) checks each route: can it reach i歌霸, which country it exits from, and, once logged in, how
+  long one address request takes. Saved routes apply from the next song on, with no restart.
+
 ## Route downloads through a mainland-China exit (when you're abroad)
 
 The songs are hosted in mainland China. From overseas, direct downloads are often slow, or the download address can't
@@ -48,7 +84,7 @@ be fetched at all. Sending only the downloads through a mainland-China exit fixe
 network is affected.
 
 **If you already have an HTTP proxy with a mainland-China exit**: set `KTV_PROXY=http://<proxy address>:<port>` in
-`.env`, then run `docker compose up -d`.
+`.env`, then run `docker compose up -d`; or add it to the admin page's download routes, as many as you have.
 
 **With WireGuard** (any VPN that has mainland-China servers and can export a WireGuard config works):
 

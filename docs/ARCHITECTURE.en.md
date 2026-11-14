@@ -32,6 +32,7 @@ dependencies.
 | `app.py` | HTTP routes (JSON API and static pages), settings, wiring everything together |
 | `room.py` | Song queue, the song playing now, playback state, activity feed, how many songs each person requested and finished; saved in `data/room.json` |
 | `jobs.py` | Download queue: two priorities, saved to disk, resumes after a restart, re-downloads |
+| `igeba_source.py` | i歌霸 account login (logs in again when the session expires) and download routes (tried in order, failed ones moved last) |
 | `igeba_dl.py` | Multi-connection, chunked downloader; also usable on its own from the command line |
 | `catalog.py` | Catalog queries, search ranking, rebuilding the catalog from i歌霸 |
 | `igeba_api.py` | i歌霸 catalog API, used to rebuild the catalog |
@@ -40,7 +41,8 @@ dependencies.
 | `web/` | Request page (`index`), TV home (`tv`), admin page (`admin`) |
 
 Files under `data/`: `igeba_catalog.db` (catalog), `config.json` (settings, including the WiFi password), `room.json`
-(queue and activity feed), `agent_state.json` (download queue), `repaired.json` (repair log).
+(queue and activity feed), `agent_state.json` (download queue), `repaired.json` (repair log), `igeba_session.json` and `igeba_cookies.txt`
+(i歌霸 login session).
 
 ### Queue and playback
 
@@ -68,6 +70,12 @@ Files under `data/`: `igeba_catalog.db` (catalog), `config.json` (settings, incl
 i歌霸's CDN returns at most 2 MiB per request (larger Ranges get a 403). From overseas, a single connection to it is slow
 and now and then stalls completely. So:
 
+- Getting an address needs a logged-in i歌霸 account (since 2026-11): `DO_LOGIN` is sent with the official client's
+  User-Agent, and address requests carry the returned cookie and UserId. When the session expires the address API
+  returns 403; the server logs in again once with the stored password and retries, at most one login per minute.
+- Download routes (set on the admin page, one proxy or `direct` per line) are tried in order: when one can't get an
+  address the next is tried, and a failed route is moved to the end for 10 minutes. Whichever route got a song's
+  address also downloads its pieces.
 - Each song is split into 512 KiB pieces (`KTV_CHUNK_KIB`), downloaded over 64 connections at once by default
   (`--threads`).
 - A piece with no data for 20 seconds is requested again; from the second failure on, a fresh download address is used,
@@ -83,8 +91,8 @@ and now and then stalls completely. So:
   re-download the old file stays until the new one is complete.
 - The download queue has two priorities: songs requested by guests go to the front, bulk jobs to the back. Songs already
   on disk are skipped, and the queue is saved to disk and resumes after a restart.
-- Downloads use the `http_proxy` environment variable (which can point to a proxy with a mainland-China exit); requests
-  to the home network never use the proxy.
+- With no download routes set, downloads first use the `http_proxy` environment variable (which can point to a proxy
+  with a mainland-China exit), then a direct connection; requests to the home network never use the proxy.
 
 ### Search ranking
 

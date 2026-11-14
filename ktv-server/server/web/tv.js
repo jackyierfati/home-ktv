@@ -97,6 +97,7 @@ function render(s) {
   } else if (nas.latest) {
     parts.push(`<span>刚加入《${esc(nas.latest.name)}》${esc(nas.latest.singer)} · ${ago(nas.latest.t)}</span>`);
   }
+  if (nas.account === false) parts.push(`<span class="warn">i歌霸 账号没登录 新歌下载不了</span>`);
   parts.push(`<span>${s.connected ? "播放器在线" : "播放器未连接"}</span>`);
   setHtml($("#status"), parts.join(""));
 
